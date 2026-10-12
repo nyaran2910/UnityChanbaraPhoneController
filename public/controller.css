@@ -66,3 +66,75 @@ fieldset {
   min-width: 40px;
   min-height: 40px;
 }
+
+/* Keep the controller fixed to the visible viewport; only settings scroll. */
+html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+body {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+main {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+main > p, #start, #recenter { flex: 0 0 auto; }
+#start, #recenter, #guard { touch-action: none; }
+#guard {
+  flex: 1 1 120px;
+  min-height: 64px;
+  max-height: 28vh;
+  max-height: 28dvh;
+}
+#axis-panel {
+  flex: 0 1 auto;
+  min-height: 36px;
+  margin-top: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+#axis-panel[open] { flex: 1 1 120px; }
+#axis-panel summary { cursor: pointer; }
+#axis-panel fieldset { min-width: 0; padding-inline: 8px; }
+#axis-panel .mapping-row, #axis-panel .axis-row { gap: 4px; }
+#axis-panel .mapping-row label, #axis-panel .axis-row label { flex: 0 0 2rem; }
+#axis-panel .mapping-row select { min-width: 0; }
+#axis-panel .direction-toggle { min-width: 40px; }
+
+/* Small/landscape screens keep all three controls and settings reachable. */
+@media (max-height: 520px) {
+  body { padding: max(8px, env(safe-area-inset-top)) 12px max(8px, env(safe-area-inset-bottom)); }
+  main {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto minmax(56px, .75fr) auto minmax(36px, 1fr);
+    column-gap: 10px;
+    row-gap: 4px;
+  }
+  main > p, #axis-panel { grid-column: 1 / -1; margin: 0; }
+  main > p:first-child { grid-row: 1; }
+  #start, #recenter, #guard { grid-row: 2; }
+  .control-hint { grid-row: 3; }
+  #axis-panel { grid-row: 4; }
+  #start, #recenter, #guard { min-height: 56px; max-height: none; height: 100%; margin: 0; }
+  #guard svg { width: 48px; height: 48px; }
+  .control-hint { font-size: 12px; }
+}
