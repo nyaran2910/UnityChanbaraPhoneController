@@ -1,7 +1,0 @@
-.git
-.github
-.local
-dist
-node_modules
-*.tar
-*.tar.gz

@@ -10,6 +10,7 @@
   const DEFAULT_AXIS_DIRECTION = Object.freeze({ x: 1, y: 1, z: 1 });
   const DEFAULT_AXIS_ADJUSTMENT = Object.freeze({ x: 0, y: 0, z: 0 });
   const AXIS_STORAGE_KEY = "kosen-chanbara-axis-adjustment-v4";
+  const RESET_LONG_PRESS_MS = 500;
   const params = new URLSearchParams(location.search);
   const session = params.get("session") || "";
   const slot = params.get("slot") || "";
@@ -18,19 +19,31 @@
   const startButton = document.getElementById("start");
   const guardButton = document.getElementById("guard");
   const recenterButton = document.getElementById("recenter");
-  const axisInputs = Object.fromEntries(
-    AXES.map(axis => [axis, document.getElementById(`axis-${axis}`)])
-  );
-  const axisOutputs = Object.fromEntries(
-    AXES.map(axis => [axis, document.getElementById(`axis-${axis}-value`)])
-  );
-  const axisMappingInputs = Object.fromEntries(
-    AXES.map(axis => [axis, document.getElementById(`axis-map-${axis}`)])
-  );
-  const axisDirectionButtons = Object.fromEntries(
-    AXES.map(axis => [axis, document.querySelector(`.direction-toggle[data-axis="${axis}"]`)])
-  );
   const savedAxisConfiguration = loadAxisConfiguration();
+  const AXIS_ORDERS = ["xyz", "xzy", "yxz", "yzx", "zxy", "zyx"];
+  const deviceId = loadDeviceId();
+  let helloConfirmed = false, helloAt = -Infinity, appliedAxisRequest = 0, axisBaseline = null;
+  function rollbackAxes() {
+    if (!axisBaseline) return;
+    state.axisMapping = axisBaseline.mapping; state.axisDirection = axisBaseline.direction; state.axisAdjustment = axisBaseline.adjustment;
+    axisBaseline = null;
+  }
+  function loadDeviceId() {
+    const key = "kosen-chanbara-device-id";
+    let id = "";
+    try { id = localStorage.getItem(key) || ""; } catch (_) { }
+    if (!/^[a-zA-Z0-9_-]{8,80}$/.test(id)) {
+      id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+      try { localStorage.setItem(key, id); } catch (_) { }
+    }
+    return id;
+  }
+  function sendAxisState(type = "axis.state", request = 0) {
+    if (!isOpen()) return;
+    const order = AXIS_ORDERS.indexOf(AXES.map(axis => state.axisMapping[axis]).join(""));
+    const signs = AXES.reduce((bits, axis, i) => bits | (state.axisDirection[axis] < 0 ? 1 << i : 0), 0);
+    state.channel.send(JSON.stringify({ type, deviceId, order, signs, request, nextSequence: state.sequence >>> 0 }));
+  }
 
   const state = {
     socket: null,
@@ -39,6 +52,8 @@
     pendingCandidates: [],
     remoteDescriptionSet: false,
     guard: false,
+    recenterHeld: false,
+    recenterPressedAt: 0,
     sequence: 0,
     recenterSequence: 0,
     orientation: [0, 0, 0, 1],
@@ -47,6 +62,7 @@
     gyroscopeValid: false,
     acceleration: [0, 0, 0],
     accelerationValid: false,
+    accelerationAt: -Infinity,
     axisMapping: savedAxisConfiguration.mapping,
     axisDirection: savedAxisConfiguration.direction,
     axisAdjustment: savedAxisConfiguration.adjustment,
@@ -61,7 +77,12 @@
     wakeLock: null
   };
 
-  initializeAxisControls();
+  for (const button of document.querySelectorAll("button")) {
+    button.addEventListener("pointerdown", event => event.preventDefault());
+    button.addEventListener("contextmenu", event => event.preventDefault());
+    button.addEventListener("selectstart", event => event.preventDefault());
+  }
+
   playerElement.textContent = slot.toUpperCase() || "--";
   if (!session || !token || (slot !== "p1" && slot !== "p2")) {
     startButton.disabled = true;
@@ -69,7 +90,18 @@
   }
 
   startButton.addEventListener("click", start);
-  recenterButton.addEventListener("click", recenter);
+  recenterButton.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    recenterButton.setPointerCapture?.(event.pointerId);
+    setRecenterHeld(true);
+  });
+  recenterButton.addEventListener("pointerup", () => setRecenterHeld(false));
+  for (const eventName of ["pointercancel", "lostpointercapture"]) {
+    recenterButton.addEventListener(eventName, () => setRecenterHeld(false, false));
+  }
+  recenterButton.addEventListener("click", event => {
+    if (event.detail === 0) recenter(); // Accessible keyboard activation.
+  });
   guardButton.addEventListener("pointerdown", event => {
     event.preventDefault();
     guardButton.setPointerCapture?.(event.pointerId);
@@ -79,9 +111,9 @@
   for (const eventName of ["pointerup", "pointercancel", "lostpointercapture"]) {
     guardButton.addEventListener(eventName, () => setGuard(false));
   }
-  window.addEventListener("blur", () => setGuard(false));
+  window.addEventListener("blur", releaseButtons);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) setGuard(false);
+    if (document.hidden) releaseButtons();
     else void requestWakeLock();
   });
   window.addEventListener("pagehide", shutdown);
@@ -122,14 +154,17 @@
 
     window.addEventListener("devicemotion", event => {
       const rotation = event.rotationRate;
-      if (rotation && finite(rotation.beta) && finite(rotation.gamma) && finite(rotation.alpha)) {
-        state.gyroscope = rotateScreen(rotation.beta, rotation.gamma, rotation.alpha, screenAngle());
+      if (rotation && finite(rotation.alpha) && finite(rotation.beta) && finite(rotation.gamma)) {
+        // rotationRate alpha/beta/gamma are X/Y/Z rates, unlike the
+        // deviceorientation Euler angles (Z/X/Y). Do not reorder the rates.
+        state.gyroscope = rotateScreen(rotation.alpha, rotation.beta, rotation.gamma, screenAngle());
         state.gyroscopeValid = true;
       }
       const acceleration = event.acceleration;
       if (acceleration && finite(acceleration.x) && finite(acceleration.y) && finite(acceleration.z)) {
         state.acceleration = rotateScreen(acceleration.x, acceleration.y, acceleration.z, screenAngle());
         state.accelerationValid = true;
+        state.accelerationAt = performance.now();
       }
     }, true);
   }
@@ -233,8 +268,41 @@
   function configureChannel(channel) {
     state.channel = channel;
     channel.binaryType = "arraybuffer";
+    channel.addEventListener("message", event => {
+      if (state.channel !== channel) return;
+      try {
+        const data = typeof event.data === "string"
+          ? event.data
+          : new TextDecoder().decode(event.data);
+        const command = JSON.parse(data);
+        if (command.type === "controller.ready") { helloConfirmed = true; return; }
+        if (["axis.configure", "axis.commit", "axis.cancel"].includes(command.type)) {
+          if (!Number.isInteger(command.order) || command.order < 0 || command.order >= 6
+              || !Number.isInteger(command.signs) || command.signs < 0 || command.signs > 7
+              || !Number.isInteger(command.request) || command.request < 1) return;
+          if (command.request < appliedAxisRequest) return;
+          appliedAxisRequest = command.request;
+          if (!axisBaseline && command.type === "axis.configure") axisBaseline = {
+            mapping: { ...state.axisMapping }, direction: { ...state.axisDirection }, adjustment: { ...state.axisAdjustment }
+          };
+          if (command.type === "axis.cancel") { rollbackAxes(); sendAxisState("axis.state", command.request); return; }
+          state.axisMapping = Object.fromEntries(AXES.map((axis, i) => [axis, AXIS_ORDERS[command.order][i]]));
+          state.axisDirection = Object.fromEntries(AXES.map((axis, i) => [axis, command.signs & (1 << i) ? -1 : 1]));
+          state.axisAdjustment = { ...DEFAULT_AXIS_ADJUSTMENT };
+          if (command.type === "axis.commit") { axisBaseline = null; saveAxisConfiguration(); }
+          sendAxisState("axis.state", command.request);
+          return;
+        }
+        if (command.type !== "vibrate" || !Number.isInteger(command.durationMs)) return;
+        if (command.durationMs < 1 || command.durationMs > 1000) return;
+        navigator.vibrate?.(command.durationMs);
+      } catch (_) {
+        // iOS and some embedded browsers do not implement vibration.
+      }
+    });
     channel.addEventListener("open", () => {
       if (state.channel !== channel) return;
+      helloConfirmed = false; helloAt = -Infinity; appliedAxisRequest = 0;
       clearConnectionTimeout();
       clearDisconnectTimer();
       if (state.reconnectTimer) window.clearTimeout(state.reconnectTimer);
@@ -242,17 +310,31 @@
       state.reconnectAttempt = 0;
       guardButton.disabled = false;
       recenterButton.disabled = false;
-      if (state.sendTimer) window.clearInterval(state.sendTimer);
+      if (state.sendTimer) window.clearTimeout(state.sendTimer);
       sendMotion();
-      state.sendTimer = window.setInterval(sendMotion, 15);
+      // Keep a 100 Hz phase despite browser timer jitter.
+      // Skip missed deadlines instead of bursting after a stalled event loop.
+      const interval = 1000 / 100;
+      let nextSendAt = performance.now() + interval;
+      const tick = () => {
+        if (state.channel !== channel || channel.readyState !== "open") return;
+        sendMotion();
+        nextSendAt += interval;
+        if (nextSendAt <= performance.now()) nextSendAt = performance.now() + interval;
+        state.sendTimer = window.setTimeout(tick, Math.max(1, Math.ceil(nextSendAt - performance.now())));
+      };
+      state.sendTimer = window.setTimeout(tick, Math.ceil(interval));
     });
     channel.addEventListener("close", () => {
-      if (state.channel === channel) recoverConnection();
+      if (state.channel === channel) { rollbackAxes(); recoverConnection(); }
     });
   }
 
   function sendMotion() {
     if (!isOpen()) return;
+    if (!helloConfirmed && performance.now() - helloAt >= 400) {
+      helloAt = performance.now(); sendAxisState("controller.hello");
+    }
     const correction = axisAdjustmentQuaternion();
     const inverseCorrection = inverseQuaternion(correction);
     const angleAdjustedOrientation = normalizeQuaternion(multiplyQuaternion(state.orientation, correction));
@@ -269,7 +351,8 @@
     let flags = state.guard ? 1 : 0;
     if (state.orientationValid) flags |= 2;
     if (state.gyroscopeValid) flags |= 4;
-    if (state.accelerationValid) flags |= 8;
+    if (state.accelerationValid && performance.now() - state.accelerationAt < 100) flags |= 8;
+    if (state.recenterHeld) flags |= 16;
     view.setUint8(0, 1);
     view.setUint8(1, flags);
     view.setUint16(2, state.recenterSequence, true);
@@ -284,6 +367,7 @@
   function setGuard(held) {
     if (state.guard === held) return;
     state.guard = held;
+    guardButton.setAttribute("aria-pressed", String(held));
     sendMotion();
   }
 
@@ -291,6 +375,23 @@
     if (!isOpen()) return;
     state.recenterSequence = (state.recenterSequence + 1) & 0xffff;
     sendMotion();
+  }
+
+  function setRecenterHeld(held, commitShortPress = true) {
+    if (state.recenterHeld === held) return;
+    const now = performance.now();
+    if (held) state.recenterPressedAt = now;
+    else if (commitShortPress && now - state.recenterPressedAt < RESET_LONG_PRESS_MS && isOpen()) {
+      state.recenterSequence = (state.recenterSequence + 1) & 0xffff;
+    }
+    state.recenterHeld = held;
+    recenterButton.setAttribute("aria-pressed", String(held));
+    sendMotion();
+  }
+
+  function releaseButtons() {
+    setGuard(false);
+    setRecenterHeld(false, false);
   }
 
   function isOpen() {
@@ -305,7 +406,7 @@
   function shutdownPeer() {
     clearConnectionTimeout();
     clearDisconnectTimer();
-    if (state.sendTimer) window.clearInterval(state.sendTimer);
+    if (state.sendTimer) window.clearTimeout(state.sendTimer);
     state.sendTimer = 0;
     const channel = state.channel;
     const peer = state.peer;
@@ -327,7 +428,7 @@
 
   function recoverConnection() {
     if (!state.started || state.shuttingDown) return;
-    state.guard = false;
+    releaseButtons();
     guardButton.disabled = true;
     recenterButton.disabled = true;
     shutdownPeer();
@@ -367,7 +468,7 @@
     state.started = false;
     if (state.reconnectTimer) window.clearTimeout(state.reconnectTimer);
     state.reconnectTimer = 0;
-    setGuard(false);
+    releaseButtons();
     shutdownPeer();
     closeSignaling();
     state.wakeLock?.release?.();
@@ -382,65 +483,9 @@
   function finite(value) { return typeof value === "number" && Number.isFinite(value); }
   function degrees(value) { return value * Math.PI / 180; }
 
-  function initializeAxisControls() {
-    for (const axis of AXES) {
-      axisInputs[axis].value = String(state.axisAdjustment[axis]);
-      axisInputs[axis].addEventListener("input", event => {
-        updateAxisAdjustment(axis, Number(event.currentTarget.value));
-      });
-      axisMappingInputs[axis].addEventListener("change", event => {
-        updateAxisMapping(axis, event.currentTarget.value);
-      });
-      axisDirectionButtons[axis].addEventListener("click", () => {
-        state.axisDirection[axis] *= -1;
-        saveAxisConfiguration();
-        renderAxisAdjustment();
-        sendMotion();
-      });
-    }
-    for (const button of document.querySelectorAll(".axis-step")) {
-      button.addEventListener("click", () => {
-        const axis = button.dataset.axis;
-        updateAxisAdjustment(axis, state.axisAdjustment[axis] + Number(button.dataset.step));
-      });
-    }
-    renderAxisAdjustment();
-  }
-
-  function updateAxisAdjustment(axis, value) {
-    if (!(axis in state.axisAdjustment) || !finite(value)) return;
-    state.axisAdjustment[axis] = Math.max(-180, Math.min(180, Math.round(value / 5) * 5));
-    saveAxisConfiguration();
-    renderAxisAdjustment();
-    sendMotion();
-  }
-
-  function updateAxisMapping(outputAxis, sourceAxis) {
-    if (!AXES.includes(outputAxis) || !AXES.includes(sourceAxis)) return;
-    const previousSource = state.axisMapping[outputAxis];
-    const swappedOutput = AXES.find(axis => axis !== outputAxis && state.axisMapping[axis] === sourceAxis);
-    state.axisMapping[outputAxis] = sourceAxis;
-    if (swappedOutput) state.axisMapping[swappedOutput] = previousSource;
-    saveAxisConfiguration();
-    renderAxisAdjustment();
-    sendMotion();
-  }
-
-  function renderAxisAdjustment() {
-    for (const axis of AXES) {
-      const value = state.axisAdjustment[axis];
-      axisInputs[axis].value = String(value);
-      axisOutputs[axis].textContent = `${value}°`;
-      axisMappingInputs[axis].value = state.axisMapping[axis];
-      const inverted = state.axisDirection[axis] < 0;
-      axisDirectionButtons[axis].textContent = inverted ? "− 反転" : "＋ 正方向";
-      axisDirectionButtons[axis].setAttribute("aria-pressed", String(inverted));
-    }
-  }
-
   function loadAxisConfiguration() {
     try {
-      const saved = JSON.parse(localStorage.getItem(AXIS_STORAGE_KEY));
+      const saved = JSON.parse(localStorage.getItem(`${AXIS_STORAGE_KEY}:${slot}`) ?? localStorage.getItem(AXIS_STORAGE_KEY));
       return saved ? normalizeAxisConfiguration(saved) : defaultAxisConfiguration();
     } catch {
       return defaultAxisConfiguration();
@@ -477,7 +522,7 @@
 
   function saveAxisConfiguration() {
     try {
-      localStorage.setItem(AXIS_STORAGE_KEY, JSON.stringify({
+      localStorage.setItem(`${AXIS_STORAGE_KEY}:${slot}`, JSON.stringify({
         mapping: state.axisMapping,
         direction: state.axisDirection,
         adjustment: state.axisAdjustment
@@ -551,14 +596,36 @@
   }
 
   function remapQuaternion(quaternion) {
-    const determinant = mappingDeterminant();
-    const vector = remapVector(quaternion.slice(0, 3));
-    return normalizeQuaternion([
-      determinant * vector[0],
-      determinant * vector[1],
-      determinant * vector[2],
-      quaternion[3]
-    ]);
+    // Keep the world frame fixed even when players remap the device axes.
+    // Changing both frames rotated gravity into a menu direction (or the
+    // ignored forward axis). Only the local/body frame is configurable.
+    // The constant left rotation cancels in inverse(reference) * current,
+    // so calibrated sword motion keeps the same axis adjustments.
+    const worldBasis = [-Math.SQRT1_2, 0, 0, Math.SQRT1_2];
+    return normalizeQuaternion(multiplyQuaternion(
+      multiplyQuaternion(worldBasis, quaternion), inverseQuaternion(axisMappingQuaternion())
+    ));
+  }
+
+  function axisMappingQuaternion() {
+    const [xx, yx, zx] = remapAxialVector([1, 0, 0]);
+    const [xy, yy, zy] = remapAxialVector([0, 1, 0]);
+    const [xz, yz, zz] = remapAxialVector([0, 0, 1]);
+    const trace = xx + yy + zz;
+    if (trace > 0) {
+      const s = 2 * Math.sqrt(trace + 1);
+      return [(zy - yz) / s, (xz - zx) / s, (yx - xy) / s, s / 4];
+    }
+    if (xx > yy && xx > zz) {
+      const s = 2 * Math.sqrt(1 + xx - yy - zz);
+      return [s / 4, (xy + yx) / s, (xz + zx) / s, (zy - yz) / s];
+    }
+    if (yy > zz) {
+      const s = 2 * Math.sqrt(1 + yy - xx - zz);
+      return [(xy + yx) / s, s / 4, (yz + zy) / s, (xz - zx) / s];
+    }
+    const s = 2 * Math.sqrt(1 + zz - xx - yy);
+    return [(xz + zx) / s, (yz + zy) / s, s / 4, (yx - xy) / s];
   }
 
   function mappingDeterminant() {
@@ -571,7 +638,9 @@
   }
 
   function rotateScreen(x, y, z, angle) {
-    const radians = -degrees(angle);
+    // deviceQuaternion right-multiplies by Rz(-screenAngle). Body vectors
+    // need the inverse basis change so the world direction stays unchanged.
+    const radians = degrees(angle);
     const cosine = Math.cos(radians);
     const sine = Math.sin(radians);
     return [x * cosine - y * sine, x * sine + y * cosine, z];

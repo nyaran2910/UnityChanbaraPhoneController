@@ -19,7 +19,7 @@ async function fixture() {
   await fs.copyFile("scripts/local-control.sh", script);
   await fs.writeFile(path.join(state, "host-key"), hostKey);
   const env = { ...process.env };
-  for (const key of ["UNITY_CONFIG", "LOCAL_PORT", "UNITY_SIGNALING_URL", "LOCAL_STOP_COMMAND", "TMUX"]) {
+  for (const key of ["UNITY_CONFIG", "UNITY_RUNTIME_CONFIG", "LOCAL_PORT", "UNITY_SIGNALING_URL", "LOCAL_STOP_COMMAND", "TMUX"]) {
     delete env[key];
   }
   return { directory, root, state, script, env };
@@ -37,7 +37,11 @@ test("starting an existing server repairs the Unity config without restarting it
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(configPath, JSON.stringify({ signalingUrl: "ws://old/signal", hostKey: "outdated" }));
 
-  await run("sh", [f.script, "start"], { cwd: f.root, env: f.env, timeout: 5000 });
+  const runtimeConfig = path.join(f.directory, "runtime/controller-connection.json");
+  await fs.mkdir(path.dirname(runtimeConfig), { recursive: true });
+  await fs.writeFile(runtimeConfig, JSON.stringify({ hostKey: "stale-runtime-key" }));
+  await run("sh", [f.script, "start"], { cwd: f.root, env: { ...f.env, UNITY_RUNTIME_CONFIG: runtimeConfig }, timeout: 5000 });
+  assert.deepEqual(JSON.parse(await fs.readFile(runtimeConfig, "utf8")), { signalingUrl: "ws://127.0.0.1:8080/signal", hostKey });
   assert.deepEqual(JSON.parse(await fs.readFile(configPath, "utf8")), {
     signalingUrl: "ws://127.0.0.1:8080/signal", hostKey
   });
@@ -80,7 +84,7 @@ if (args.shift() === 'kill-session') {
   process.exit(0);
 }
 const env = { ...process.env };
-for (const name of ['UNITY_CONFIG', 'LOCAL_PORT', 'UNITY_SIGNALING_URL', 'LOCAL_STOP_COMMAND']) delete env[name];
+for (const name of ['UNITY_CONFIG', 'UNITY_RUNTIME_CONFIG', 'LOCAL_PORT', 'UNITY_SIGNALING_URL', 'LOCAL_STOP_COMMAND']) delete env[name];
 while (args[0]?.startsWith('-')) {
   const flag = args.shift();
   if (flag === '-d') continue;
@@ -104,16 +108,18 @@ child.unref();
     }
   });
   const customConfig = path.join(f.directory, "selected Unity project/connection.json");
+  const runtimeConfig = path.join(f.directory, "runtime/controller-connection.json");
   const started = await run("sh", [f.script, "start"], {
     cwd: f.root, timeout: 12000,
     env: {
-      ...env, UNITY_CONFIG: "../selected Unity project/connection.json", LOCAL_PORT: "9099",
-      UNITY_SIGNALING_URL: "ws://127.0.0.1:9099/custom-signal", LOCAL_STOP_COMMAND: "make phone-controller-local-stop"
+      ...env, UNITY_CONFIG: "../selected Unity project/connection.json", UNITY_RUNTIME_CONFIG: runtimeConfig, LOCAL_PORT: "9099",
+      UNITY_SIGNALING_URL: "ws://127.0.0.1:9099/custom-signal", LOCAL_STOP_COMMAND: "just phone-stop"
     }
   });
   assert.deepEqual(JSON.parse(await fs.readFile(customConfig, "utf8")), {
     signalingUrl: "ws://127.0.0.1:9099/custom-signal", hostKey
   });
-  assert.match(started.stdout, /停止: make phone-controller-local-stop/);
+  assert.deepEqual(JSON.parse(await fs.readFile(runtimeConfig, "utf8")), { signalingUrl: "ws://127.0.0.1:9099/custom-signal", hostKey });
+  assert.match(started.stdout, /停止: just phone-stop/);
   await assert.rejects(fs.access(path.join(f.directory, "KosenChanbara/Assets/StreamingAssets/controller-connection.json")));
 });

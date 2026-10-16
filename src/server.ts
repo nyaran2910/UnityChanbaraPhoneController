@@ -161,6 +161,10 @@ export function createControllerServer(options: ControllerServerOptions): Contro
     }
   }, 60_000);
   cleanupTimer.unref();
+  const heartbeatTimer = setInterval(() => {
+    for (const session of sessions.values()) send(session.host, { type: "host.alive" });
+  }, 5000);
+  heartbeatTimer.unref();
 
   async function handleMessage(
     webSocket: WebSocket,
@@ -290,6 +294,7 @@ export function createControllerServer(options: ControllerServerOptions): Contro
     server,
     async close() {
       clearInterval(cleanupTimer);
+      clearInterval(heartbeatTimer);
       for (const session of sessions.values()) destroySession(session, sessions);
       for (const client of wss.clients) client.terminate();
       await new Promise<void>(resolve => wss.close(() => resolve()));

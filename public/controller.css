@@ -5,8 +5,14 @@
 body {
   margin: 0;
   padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  font: 600 16px/1.5 -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  color: #294d68;
+  background: linear-gradient(160deg, #e6f7ff, #fff 65%);
+  min-height: 100vh;
 }
 
+main { max-width: 480px; margin: 0 auto; }
+.player-label { color: #248bcb; font-size: 20px; }
 p {
   margin: 0 0 12px;
 }
@@ -31,43 +37,38 @@ input {
   -webkit-touch-callout: none;
 }
 
-details {
-  margin-top: 20px;
+/* No text selection, touch callout, or accidental pointer focus during play. */
+button {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  color: #2789bd;
+  background: #fff;
+  border: 2px solid #b8dcef;
+  border-radius: 20px;
+  box-shadow: 0 4px 0 #c7e2f0;
 }
-
-fieldset {
-  margin: 12px 0;
+button:disabled { opacity: .5; }
+button:active, button[aria-pressed="true"] { box-shadow: 0 1px 0 #b8dcef; transform: translateY(3px); }
+button:focus-visible { outline: 3px solid #76bee7; outline-offset: 3px; }
+#guard { border-radius: 28px; background: linear-gradient(#fff, #eaf8ff); }
+#guard[aria-pressed="true"] { background: #d6effb; }
+button svg {
+  display: block;
+  width: 28px;
+  height: 28px;
+  margin: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
 }
+#guard svg { width: 68px; height: 68px; }
 
-.mapping-row,
-.axis-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 10px 0;
-}
-
-.mapping-row label,
-.axis-row label {
-  width: 3rem;
-}
-
-.axis-row input {
-  flex: 1;
-  min-width: 0;
-}
-
-.axis-row output {
-  width: 3.5rem;
-  text-align: right;
-}
-
-.axis-step {
-  min-width: 40px;
-  min-height: 40px;
-}
-
-/* Keep the controller fixed to the visible viewport; only settings scroll. */
+/* Keep the controller fixed to the visible viewport. */
 html {
   width: 100%;
   height: 100%;
@@ -101,40 +102,19 @@ main > p, #start, #recenter { flex: 0 0 auto; }
   max-height: 28vh;
   max-height: 28dvh;
 }
-#axis-panel {
-  flex: 0 1 auto;
-  min-height: 36px;
-  margin-top: 4px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  touch-action: pan-y;
-  -webkit-overflow-scrolling: touch;
-}
-#axis-panel[open] { flex: 1 1 120px; }
-#axis-panel summary { cursor: pointer; }
-#axis-panel fieldset { min-width: 0; padding-inline: 8px; }
-#axis-panel .mapping-row, #axis-panel .axis-row { gap: 4px; }
-#axis-panel .mapping-row label, #axis-panel .axis-row label { flex: 0 0 2rem; }
-#axis-panel .mapping-row select { min-width: 0; }
-#axis-panel .direction-toggle { min-width: 40px; }
-
-/* Small/landscape screens keep all three controls and settings reachable. */
+/* Small/landscape screens keep all three controls visible. */
 @media (max-height: 520px) {
   body { padding: max(8px, env(safe-area-inset-top)) 12px max(8px, env(safe-area-inset-bottom)); }
   main {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: auto minmax(56px, .75fr) auto minmax(36px, 1fr);
+    grid-template-rows: auto minmax(56px, 1fr);
     column-gap: 10px;
     row-gap: 4px;
   }
-  main > p, #axis-panel { grid-column: 1 / -1; margin: 0; }
+  main > p { grid-column: 1 / -1; margin: 0; }
   main > p:first-child { grid-row: 1; }
   #start, #recenter, #guard { grid-row: 2; }
-  .control-hint { grid-row: 3; }
-  #axis-panel { grid-row: 4; }
   #start, #recenter, #guard { min-height: 56px; max-height: none; height: 100%; margin: 0; }
   #guard svg { width: 48px; height: 48px; }
-  .control-hint { font-size: 12px; }
 }

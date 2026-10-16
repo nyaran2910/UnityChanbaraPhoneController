@@ -20,7 +20,12 @@ case "$unity_config" in
   /*) ;;
   *) unity_config="$root_dir/$unity_config" ;;
 esac
-export UNITY_CONFIG="$unity_config" LOCAL_PORT="$port"
+runtime_config=${UNITY_RUNTIME_CONFIG:-}
+case "$runtime_config" in
+  ''|/*) ;;
+  *) runtime_config="$root_dir/$runtime_config" ;;
+esac
+export UNITY_CONFIG="$unity_config" UNITY_RUNTIME_CONFIG="$runtime_config" LOCAL_PORT="$port"
 wrangler="$root_dir/node_modules/.bin/wrangler"
 
 pid_is_running() {
@@ -103,8 +108,18 @@ write_unity_config() {
     printf '  "hostKey": "%s"\n' "$host_key"
     printf '}\n'
   } >"$config_tmp"
+  chmod 600 "$config_tmp"
   mv "$config_tmp" "$unity_config"
   trap - EXIT HUP INT TERM
+  if [ -n "$runtime_config" ] && [ "$runtime_config" != "$unity_config" ]; then
+    mkdir -p "$(dirname "$runtime_config")"
+    runtime_tmp=$(mktemp "$runtime_config.tmp.XXXXXX")
+    trap 'rm -f "$runtime_tmp"' EXIT HUP INT TERM
+    cp "$unity_config" "$runtime_tmp"
+    chmod 600 "$runtime_tmp"
+    mv "$runtime_tmp" "$runtime_config"
+    trap - EXIT HUP INT TERM
+  fi
 }
 
 public_health_is_ok() {
@@ -203,7 +218,7 @@ start_services() {
       echo "起動しました。"
       echo "スマホ用URL: $public_url"
       echo "Unity設定: $unity_config"
-      echo "停止: ${LOCAL_STOP_COMMAND:-make stop}"
+      echo "停止: ${LOCAL_STOP_COMMAND:-just --justfile ../../justfile phone-stop}"
       return
     fi
     sleep 0.5
@@ -261,9 +276,10 @@ start_detached() {
     # An existing tmux server does not inherit the caller's exported settings.
     tmux new-session -d -s "$session_name" \
       -e "UNITY_CONFIG=$unity_config" \
+      -e "UNITY_RUNTIME_CONFIG=$runtime_config" \
       -e "LOCAL_PORT=$port" \
       -e "UNITY_SIGNALING_URL=${UNITY_SIGNALING_URL:-}" \
-      -e "LOCAL_STOP_COMMAND=${LOCAL_STOP_COMMAND:-make stop}" \
+      -e "LOCAL_STOP_COMMAND=${LOCAL_STOP_COMMAND:-just --justfile ../../justfile phone-stop}" \
       "$script_path" supervise
   elif command -v screen >/dev/null 2>&1; then
     screen -S "$session_name" -X quit >/dev/null 2>&1 || true
@@ -279,7 +295,7 @@ start_detached() {
       echo "起動しました。"
       echo "スマホ用URL: $(sed -n '1p' "$url_file")"
       echo "Unity設定: $unity_config"
-      echo "停止: ${LOCAL_STOP_COMMAND:-make stop}"
+      echo "停止: ${LOCAL_STOP_COMMAND:-just --justfile ../../justfile phone-stop}"
       return
     fi
     sleep 0.25
