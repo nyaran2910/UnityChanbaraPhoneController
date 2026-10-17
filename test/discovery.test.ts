@@ -65,3 +65,26 @@ test("four games use the discovered dynamic key and receive separate sessions an
     }
   }
 });
+
+test("unreachable discovery peer does not stop discovery or hide fatal socket errors", async t => {
+  t.mock.method(console, "warn", () => {});
+  const fatal: Error[] = [];
+  const server = await startDiscovery({ httpPort: 8080, hostKey, serverId: randomUUID(), port: 0, onError: e => fatal.push(e) });
+  t.after(() => server.close());
+  const send = server.send;
+  server.send = ((...args: any[]) => args.at(-1)(Object.assign(new Error("unreachable peer"), { code: "EHOSTUNREACH" }))) as typeof server.send;
+  server.emit("message", Buffer.from(JSON.stringify({ type: "kosen.phone.discover", version: 1, nonce: "a".repeat(32) })), { port: 12345, address: "127.0.0.1" });
+  server.emit("error", Object.assign(new Error("unreachable peer"), { code: "EHOSTUNREACH" }));
+  assert.equal(fatal.length, 0);
+  server.send = send;
+  const client = dgram.createSocket("udp4");
+  t.after(() => client.close());
+  client.bind(0, "127.0.0.1"); await once(client, "listening");
+  const received = once(client, "message");
+  client.send(JSON.stringify({ type: "kosen.phone.discover", version: 1, nonce: "b".repeat(32) }), server.address().port, "127.0.0.1");
+  const [reply] = await received;
+  assert.equal(JSON.parse(reply.toString()).nonce, "b".repeat(32));
+  const error = Object.assign(new Error("bad socket"), { code: "EBADF" });
+  server.emit("error", error);
+  assert.deepEqual(fatal, [error]);
+});

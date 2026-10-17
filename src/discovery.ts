@@ -10,6 +10,16 @@ export async function startDiscovery(options: {
 }) {
   const socket = dgram.createSocket("udp4");
   const onError = options.onError ?? console.error;
+  // A lost peer only loses this reply; it must not stop all LAN services.
+  const onSendError = (error: Error | null) => {
+    if (error) console.warn(`Discovery reply failed: ${error.message}`);
+  };
+  const onSocketError = (error: NodeJS.ErrnoException) => {
+    if (['EHOSTUNREACH', 'ENETUNREACH', 'EHOSTDOWN', 'ENETDOWN', 'ECONNREFUSED', 'ENOBUFS', 'EAGAIN'].includes(error.code ?? '')) {
+      onSendError(error);
+    } else onError(error);
+  };
+
   const lan = Object.values(networkInterfaces()).flat().find(a => a?.address === options.lanAddress);
   if (options.lanAddress && !lan) throw new Error("Phone discovery LAN address is not assigned to this PC");
   const number = (ip: string) => ip.split(".").reduce((n, v) => (n * 256 + Number(v)) >>> 0, 0);
@@ -24,12 +34,12 @@ export async function startDiscovery(options: {
         typeof query.nonce !== "string" || !/^[a-f0-9]{32}$/.test(query.nonce)) return;
     const reply = Buffer.from(JSON.stringify({ type: "kosen.phone.offer", version: 1,
       nonce: query.nonce, serverId: options.serverId, port: options.httpPort, hostKey: options.hostKey }));
-    socket.send(reply, remote.port, remote.address, error => { if (error) onError(error); });
+    socket.send(reply, remote.port, remote.address, onSendError);
   });
   await new Promise<void>((resolve, reject) => {
     socket.once("error", reject);
     socket.bind(options.port ?? DISCOVERY_PORT, "0.0.0.0", () => { socket.removeListener("error", reject); resolve(); });
   }).catch(error => { socket.close(); throw error; });
-  socket.on("error", onError);
+  socket.on("error", onSocketError);
   return socket;
 }
