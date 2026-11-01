@@ -33,6 +33,7 @@ interface ClientContext {
 export interface ControllerServerOptions {
   hostKey: string;
   publicBaseUrl: string;
+  wifi?: { ssid: string; password: string };
   publicDir?: string;
   sessionTtlMilliseconds?: number;
 }
@@ -52,6 +53,7 @@ const contentTypes: Record<string, string> = {
 };
 
 export function createControllerServer(options: ControllerServerOptions): ControllerServer {
+  if (options.wifi) wifiPayload(options.wifi);
   if (options.hostKey.length < 24) {
     throw new Error("HOST_KEY must be at least 24 characters");
   }
@@ -189,6 +191,7 @@ export function createControllerServer(options: ControllerServerOptions): Contro
         send(webSocket, {
           type: "session.created",
           sessionId: session.id,
+          wifi: options.wifi ? { ssid: options.wifi.ssid, qrPngBase64: await QRCode.toDataURL(wifiPayload(options.wifi), { errorCorrectionLevel: "M", margin: 4, width: 512 }) } : null,
           slots: Object.fromEntries(presentations.map(item => [item.slot, item]))
         });
         return;
@@ -419,4 +422,11 @@ function secretMatches(received: string, expected: string): boolean {
   const receivedHash = createHash("sha256").update(received).digest();
   const expectedHash = createHash("sha256").update(expected).digest();
   return timingSafeEqual(receivedHash, expectedHash);
+}
+
+export function wifiPayload(wifi: { ssid: string; password: string }): string {
+  if (!wifi.ssid || Buffer.byteLength(wifi.ssid, "utf8") > 32 || /[\x00-\x1f\x7f]/.test(wifi.ssid) || !/^[\x20-\x7e]{8,63}$/.test(wifi.password))
+    throw new Error("Invalid AP Wi-Fi configuration");
+  const escape = (value: string) => value.replace(/[\\;,:"]/g, "\\$&");
+  return `WIFI:T:WPA;S:${escape(wifi.ssid)};P:${escape(wifi.password)};;`;
 }

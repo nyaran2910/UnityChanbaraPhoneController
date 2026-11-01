@@ -164,7 +164,7 @@ test("long press prevents pointer focus, selection and menus, then releases guar
   assert.equal(guard.attributes.get("aria-pressed"), "false");
 });
 
-test("phone page omits manual movement settings and play hints", () => {
+test("phone page omits manual movement settings", () => {
   const html = readFileSync("public/index.html", "utf8");
   assert.doesNotMatch(html, /動きの調整|振って選ぶ|盾で決定|control-hint|axis-panel|axis-map-|axis-[xyz]-value/);
 });
@@ -449,4 +449,26 @@ test("all six axis orders and eight sign masks can be previewed without changing
   }
   channel.dispatch("message", { data: JSON.stringify({ type: "axis.configure", order: 6, signs: 8, request: 99 }) });
   assert.equal(page.messages.at(-1).request, 48, "Malformed settings are ignored.");
+});
+
+test("axis configuration changes transmitted gyroscope directions, not only stored settings", () => {
+  const page = controller();
+  const channel = page.connect();
+  page.state.gyroscope = [11, 23, 37];
+  page.state.gyroscopeValid = true;
+  const packets = new Set<string>();
+  for (let order = 0; order < 6; order++) {
+    const values = [];
+    for (let signs = 0; signs < 2; signs++) {
+      channel.dispatch("message", { data: JSON.stringify({ type: "axis.configure", order, signs, request: 1 + order * 2 + signs }) });
+      const ack = page.messages.at(-1);
+      page.send();
+      const packet = page.packets.at(-1)!;
+      assert.equal(packet.getUint32(4, true), ack.nextSequence);
+      values.push([32, 36, 40].map(offset => packet.getFloat32(offset, true)));
+    }
+    assert.notDeepEqual(values[0], values[1], "Reversing an axis changes motion packets.");
+    packets.add(JSON.stringify(values[0]));
+  }
+  assert.equal(packets.size, 6, "All six orders must transmit different axis mappings for the same physical motion.");
 });

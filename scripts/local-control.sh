@@ -278,6 +278,8 @@ start_detached() {
       -e "UNITY_CONFIG=$unity_config" \
       -e "UNITY_RUNTIME_CONFIG=$runtime_config" \
       -e "LOCAL_PORT=$port" \
+      -e "WIFI_SSID1=${WIFI_SSID1:-${WIFI_SSID_1:-${WIFI_SSID:-}}}" \
+      -e "WIFI_PASS1=${WIFI_PASS1:-${WIFI_PASS_1:-${WIFI_PASS:-}}}" \
       -e "UNITY_SIGNALING_URL=${UNITY_SIGNALING_URL:-}" \
       -e "LOCAL_STOP_COMMAND=${LOCAL_STOP_COMMAND:-just --justfile ../../justfile phone-stop}" \
       "$script_path" supervise

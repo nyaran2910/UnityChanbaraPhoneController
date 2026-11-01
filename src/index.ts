@@ -1,3 +1,4 @@
+import { loadWifiConfig } from "./wifi-config.js";
 import { randomUUID } from "node:crypto";
 import { startDiscovery, DISCOVERY_PORT } from "./discovery.js";
 import { createControllerServer } from "./server.js";
@@ -13,7 +14,8 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const discoveryPort = Number(process.env.PHONE_DISCOVERY_PORT ?? DISCOVERY_PORT);
 if (!Number.isInteger(discoveryPort) || discoveryPort < 1 || discoveryPort > 65535)
   throw new Error("PHONE_DISCOVERY_PORT must be an integer from 1 to 65535");
-const app = createControllerServer({ hostKey, publicBaseUrl });
+const wifi = await loadWifiConfig();
+const app = createControllerServer({ hostKey, publicBaseUrl, wifi });
 let discovery: Awaited<ReturnType<typeof startDiscovery>> | undefined;
 try {
   await new Promise<void>((resolve, reject) => {

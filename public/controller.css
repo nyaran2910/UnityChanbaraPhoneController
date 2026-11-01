@@ -1,74 +1,4 @@
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
-  font: 600 16px/1.5 -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
-  color: #294d68;
-  background: linear-gradient(160deg, #e6f7ff, #fff 65%);
-  min-height: 100vh;
-}
-
-main { max-width: 480px; margin: 0 auto; }
-.player-label { color: #248bcb; font-size: 20px; }
-p {
-  margin: 0 0 12px;
-}
-
-button,
-select,
-input {
-  font: inherit;
-}
-
-#start,
-#recenter,
-#guard {
-  width: 100%;
-  min-height: 48px;
-  margin-bottom: 12px;
-}
-
-#guard {
-  min-height: 28vh;
-  touch-action: none;
-  -webkit-touch-callout: none;
-}
-
-/* No text selection, touch callout, or accidental pointer focus during play. */
-button {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-  touch-action: manipulation;
-  color: #2789bd;
-  background: #fff;
-  border: 2px solid #b8dcef;
-  border-radius: 20px;
-  box-shadow: 0 4px 0 #c7e2f0;
-}
-button:disabled { opacity: .5; }
-button:active, button[aria-pressed="true"] { box-shadow: 0 1px 0 #b8dcef; transform: translateY(3px); }
-button:focus-visible { outline: 3px solid #76bee7; outline-offset: 3px; }
-#guard { border-radius: 28px; background: linear-gradient(#fff, #eaf8ff); }
-#guard[aria-pressed="true"] { background: #d6effb; }
-button svg {
-  display: block;
-  width: 28px;
-  height: 28px;
-  margin: auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  pointer-events: none;
-}
-#guard svg { width: 68px; height: 68px; }
-
-/* Keep the controller fixed to the visible viewport. */
+* { box-sizing: border-box; }
 html {
   width: 100%;
   height: 100%;
@@ -78,43 +8,67 @@ html {
 body {
   position: fixed;
   inset: 0;
+  margin: 0;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   width: 100%;
   height: 100vh;
   height: 100dvh;
-  min-height: 0;
   overflow: hidden;
   overscroll-behavior: none;
+  font: 600 16px/1.5 -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  color: #294d68;
+  background: linear-gradient(160deg, #e6f7ff, #fff 65%);
 }
 main {
   display: flex;
   flex-direction: column;
+  gap: 12px;
   width: 100%;
   height: 100%;
+  max-width: 520px;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  margin: 0 auto;
 }
-main > p, #start, #recenter { flex: 0 0 auto; }
-#start, #recenter, #guard { touch-action: none; }
-#guard {
-  flex: 1 1 120px;
-  min-height: 64px;
-  max-height: 28vh;
-  max-height: 28dvh;
+/* Number shapes are SVG paths: iOS cannot select or copy them as text. */
+button {
+  flex: 1 1 64px;
+  width: 100%;
+  min-height: 56px;
+  font: inherit;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+  color: #2789bd;
+  background: #fff;
+  border: 2px solid #b8dcef;
+  border-radius: 20px;
+  box-shadow: 0 4px 0 #c7e2f0;
 }
-/* Small/landscape screens keep all three controls visible. */
+button:disabled { opacity: .5; }
+button:active, button[aria-pressed="true"] { box-shadow: 0 1px 0 #b8dcef; transform: translateY(3px); }
+button:focus-visible { outline: 3px solid #76bee7; outline-offset: 3px; }
+#guard { flex: 2 1 160px; border-radius: 28px; background: linear-gradient(#fff, #eaf8ff); }
+#guard[aria-pressed="true"] { background: #d6effb; }
+button svg {
+  display: block;
+  width: 32px;
+  height: 42px;
+  margin: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+#guard svg { width: 44px; height: 58px; }
+/* Keep the numbered buttons stacked and visible on short screens. */
 @media (max-height: 520px) {
-  body { padding: max(8px, env(safe-area-inset-top)) 12px max(8px, env(safe-area-inset-bottom)); }
-  main {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: auto minmax(56px, 1fr);
-    column-gap: 10px;
-    row-gap: 4px;
-  }
-  main > p { grid-column: 1 / -1; margin: 0; }
-  main > p:first-child { grid-row: 1; }
-  #start, #recenter, #guard { grid-row: 2; }
-  #start, #recenter, #guard { min-height: 56px; max-height: none; height: 100%; margin: 0; }
-  #guard svg { width: 48px; height: 48px; }
+  body { padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  main { gap: 8px; }
+  button { min-height: 40px; }
+  #guard { flex-basis: 80px; }
+  button svg, #guard svg { width: 24px; height: 32px; }
 }

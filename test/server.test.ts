@@ -3,7 +3,7 @@ import { once } from "node:events";
 import path from "node:path";
 import test from "node:test";
 import { WebSocket } from "ws";
-import { createControllerServer } from "../src/server.js";
+import { createControllerServer, wifiPayload } from "../src/server.js";
 
 const hostKey = "test-host-key-with-more-than-24-characters";
 
@@ -195,3 +195,22 @@ async function nextMessages(socket: WebSocket, count: number): Promise<any[]> {
     socket.on("message", onMessage);
   });
 }
+
+
+test("Wi-Fi QR escapes AP credentials and is delivered only to the authenticated host", async t => {
+  const wifi = { ssid: 'Hall;"\\,AP', password: 'secret:;\\123' };
+  assert.equal(wifiPayload(wifi), 'WIFI:T:WPA;S:Hall\\;\\"\\\\\\,AP;P:secret\\:\\;\\\\123;;');
+  assert.throws(() => wifiPayload({ ssid: "", password: "12345678" }), /Invalid AP/);
+  const app = createControllerServer({ hostKey, publicBaseUrl: "https://controller.example.test", wifi });
+  t.after(() => app.close());
+  app.server.listen(0, "127.0.0.1"); await once(app.server, "listening");
+  const address = app.server.address(); assert(address && typeof address === "object");
+  const host = await connect(`ws://127.0.0.1:${address.port}/signal`);
+  host.send(JSON.stringify({ type: "host.create", hostKey }));
+  const created = await nextMessage(host);
+  assert.equal(created.wifi.ssid, wifi.ssid);
+  assert.match(created.wifi.qrPngBase64, /^data:image\/png;base64,/);
+  assert.equal(created.wifi.password, undefined);
+  const response = await fetch(`http://127.0.0.1:${address.port}/`);
+  assert(!(await response.text()).includes(wifi.password));
+});
